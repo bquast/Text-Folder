@@ -1,5 +1,6 @@
 // AppDelegate.m
 #import "AppDelegate.h"
+#import "FileSystemItem.h"
 
 // --- Helper C Function for Creating Menu Items ---
 // Creates a menu item and adds it to a menu.
@@ -240,43 +241,51 @@ NSMenuItem* createMenuItem(NSMenu *menu, NSString *title, NSString *keyEquivalen
 // --- Helper Method to Load Root Items ---
 
 - (void)loadFileSystemItems {
-    NSLog(@"loadFileSystemItems called for path: %@", self.rootPath); // <-- Log entry
+    NSLog(@"loadFileSystemItems called for path: %@", self.rootPath);
     if (!self.rootPath) {
-         NSLog(@"No root path set, clearing items."); // <-- Log no path
-        self.rootItems = @[];
+        self.rootItems = @[]; // Empty array if no path
+        dispatch_async(dispatch_get_main_queue(), ^{ [self.outlineView reloadData]; });
         return;
     }
 
-    NSFileManager *fileManager = [NSFileManager defaultManager];
+    NSFileManager *fm = [NSFileManager defaultManager];
     NSError *error = nil;
-    NSArray *contents = [fileManager contentsOfDirectoryAtPath:self.rootPath error:&error];
+    // Get contents, skip hidden files and subdirectories
+    NSArray *rawContents = [fm contentsOfDirectoryAtPath:self.rootPath error:&error];
 
     if (error) {
-        NSLog(@"Error reading directory %@: %@", self.rootPath, error);
+        NSLog(@"Error reading root directory %@: %@", self.rootPath, error);
         self.rootItems = @[];
         NSAlert *alert = [NSAlert alertWithError:error];
         [alert runModal];
-        return;
+    } else {
+        NSMutableArray<FileSystemItem *> *items = [NSMutableArray array];
+        for (NSString *name in rawContents) {
+            if (![name hasPrefix:@"."]) { // Basic filter for hidden files
+                NSString *fullPath = [self.rootPath stringByAppendingPathComponent:name];
+                // Create FileSystemItem objects for the top level
+                FileSystemItem *item = [[FileSystemItem alloc] initWithPath:fullPath relativeTo:self.rootPath];
+                [items addObject:item];
+            }
+        }
+        // Sort top-level items alphabetically
+        [items sortUsingComparator:^NSComparisonResult(FileSystemItem *obj1, FileSystemItem *obj2) {
+            return [obj1.displayName localizedStandardCompare:obj2.displayName];
+        }];
+        self.rootItems = [items copy]; // Assign the array of FileSystemItem
+        NSLog(@"Loaded %lu root items: %@", (unsigned long)self.rootItems.count, self.rootItems);
     }
-
-    NSPredicate *predicate = [NSPredicate predicateWithFormat:@"NOT self BEGINSWITH '.'"];
-    NSArray *visibleItems = [contents filteredArrayUsingPredicate:predicate];
-    self.rootItems = [visibleItems sortedArrayUsingSelector:@selector(localizedStandardCompare:)];
-    NSLog(@"Loaded %lu items: %@", (unsigned long)self.rootItems.count, self.rootItems);
 
     // IMPORTANT: Reload the outline view data on the main thread
     dispatch_async(dispatch_get_main_queue(), ^{
         NSLog(@"Executing reloadData on main queue.");
         [self.outlineView reloadData];
         NSLog(@"OutlineView reloadData finished on main queue.");
-
-        // *** Explicitly trigger layout updates AFTER reloadData ***
-        NSLog(@"Adjusting splitView subviews.");
-        [self.splitView adjustSubviews]; // Force split view to recalculate layout
-        NSLog(@"LayoutIfNeeded on sidebarScrollView.");
-        [self.sidebarScrollView layoutSubtreeIfNeeded]; // Force scroll view layout
-
-        NSLog(@"OutlineView reloaded and layout triggered.");
+        // Optional: Trigger layout updates if needed
+        // NSLog(@"Adjusting splitView subviews.");
+        // [self.splitView adjustSubviews];
+        // NSLog(@"LayoutIfNeeded on sidebarScrollView.");
+        // [self.sidebarScrollView layoutSubtreeIfNeeded];
     });
      NSLog(@"loadFileSystemItems method finished.");
 }
@@ -284,135 +293,159 @@ NSMenuItem* createMenuItem(NSMenu *menu, NSString *title, NSString *keyEquivalen
 
 // --- NSOutlineViewDataSource Methods ---
 
-// Returns the number of child items for a given item.
+// How many children does 'item' have?
 - (NSInteger)outlineView:(NSOutlineView *)outlineView numberOfChildrenOfItem:(nullable id)item {
-    NSLog(@"numberOfChildrenOfItem: item = %@", item); // <-- Log entry
-
     if (item == nil) {
         // item is nil for the root level
         NSInteger count = self.rootItems ? self.rootItems.count : 0;
-        // Add detailed logging for the root case
-        NSLog(@"numberOfChildrenOfItem: item = nil (root). self.rootItems count = %ld. Array pointer: %p", (long)count, self.rootItems);
-         if (self.rootItems == nil) {
-             // This warning might appear during initial setup before loading, which is okay.
-             // Consider adding context if logging this warning.
-              NSLog(@" -> WARNING: self.rootItems is nil when querying root children count!");
-         }
-        NSLog(@" -> Returning %ld children for root item.", (long)count); // <-- Log return value
+        NSLog(@"numberOfChildrenOfItem: item = nil (root). Returning %ld", (long)count);
+        return count;
+    } else if ([item isKindOfClass:[FileSystemItem class]]) {
+        FileSystemItem *fsItem = (FileSystemItem *)item;
+        if (!fsItem.isDirectory) {
+             NSLog(@"numberOfChildrenOfItem: item = %@ (File). Returning 0", fsItem.relativePath);
+            return 0; // Files have no children
+        }
+        // For directories, load children if needed, then return count
+        if (fsItem.children == nil) { // Check if children need loading
+             [fsItem loadChildrenRelativeTo:self.rootPath];
+        }
+         NSInteger count = fsItem.children ? fsItem.children.count : 0;
+         NSLog(@"numberOfChildrenOfItem: item = %@ (Dir). Returning %ld", fsItem.relativePath, (long)count);
         return count;
     }
-    // For this simple version, items (files/folders) don't have children shown
-     NSLog(@"numberOfChildrenOfItem: item = %@. Returning 0 children.", item);
+    NSLog(@"numberOfChildrenOfItem: item = %@ (Unknown type). Returning 0", item);
     return 0;
 }
 
-// Returns the actual child item at a specific index for a given parent item.
+// What is the child at 'index' for 'item'?
 - (id)outlineView:(NSOutlineView *)outlineView child:(NSInteger)index ofItem:(nullable id)item {
-     NSLog(@"***** dataSource: outlineView:child:ofItem: CALLED! index=%ld, item=%@", (long)index, item);
-
-     if (item == nil) { // Root item
-         if (self.rootItems && index >= 0 && index < self.rootItems.count) {
-             NSLog(@" -> Returning child %ld for root: %@", (long)index, self.rootItems[index]);
-             return self.rootItems[index]; // Return the NSString filename
-         }
-          NSLog(@" -> Returning nil for root child (index %ld out of bounds or rootItems nil)", (long)index);
-     } else { // No children for file/folder items in this simple model
-          NSLog(@" -> Returning nil (item %@ is not root)", item);
-     }
-     return nil;
+    NSLog(@"***** dataSource: outlineView:child:ofItem: CALLED! index=%ld, item=%@", (long)index, item);
+    if (item == nil) { // Root item
+        if (self.rootItems && index >= 0 && index < self.rootItems.count) {
+             NSLog(@" -> Returning root child %ld: %@", (long)index, self.rootItems[index]);
+            return self.rootItems[index];
+        }
+    } else if ([item isKindOfClass:[FileSystemItem class]]) {
+        FileSystemItem *fsItem = (FileSystemItem *)item;
+        // Ensure children are loaded before accessing
+        if (fsItem.isDirectory && fsItem.children == nil) {
+            [fsItem loadChildrenRelativeTo:self.rootPath];
+        }
+        // Return the specific child if it exists
+        if (fsItem.children && index >= 0 && index < fsItem.children.count) {
+             NSLog(@" -> Returning child %ld for %@: %@", (long)index, fsItem.relativePath, fsItem.children[index]);
+            return fsItem.children[index];
+        }
+    }
+     NSLog(@" -> Returning nil (index %ld out of bounds, item not dir, or unknown item type: %@)", (long)index, item);
+    return nil;
 }
 
-// Determines if a given item can be expanded (i.e., if it's a directory).
+// Can 'item' be expanded (does it have children)?
 - (BOOL)outlineView:(NSOutlineView *)outlineView isItemExpandable:(id)item {
-    NSLog(@"***** dataSource: outlineView:isItemExpandable: CALLED! item=%@", item);
-    // Regardless of whether it's a directory or file, in this simple flat list model,
-    // items are never expandable by the user clicking a disclosure triangle.
-    // The 'item == nil' case refers to the invisible root.
-    NSLog(@" -> Returning NO (items are not expandable in this view)");
-    return NO; // <-- CHANGE THIS: Always return NO for simplicity
+     NSLog(@"***** dataSource: outlineView:isItemExpandable: CALLED! item=%@", item);
+    if (item == nil) {
+         NSLog(@" -> Returning NO (root is not expandable)");
+        return NO; // Root is not visually expandable
+    }
+    if ([item isKindOfClass:[FileSystemItem class]]) {
+        FileSystemItem *fsItem = (FileSystemItem *)item;
+        BOOL expandable = fsItem.isDirectory; // Only directories are expandable
+         NSLog(@" -> Returning %@ for %@", expandable ? @"YES" : @"NO", fsItem.relativePath);
+        return expandable;
+    }
+     NSLog(@" -> Returning NO (unknown item type)");
+    return NO;
 }
 
-// Returns the value to display in a specific column for a given item.
+// What value should be displayed for 'item' in 'tableColumn'?
 - (nullable id)outlineView:(NSOutlineView *)outlineView objectValueForTableColumn:(nullable NSTableColumn *)tableColumn byItem:(nullable id)item {
     NSLog(@"***** dataSource: outlineView:objectValueForTableColumn:byItem: CALLED! item=%@", item);
-
-    // 'item' should be the NSString filename returned by child:ofItem:
-    if (item && [item isKindOfClass:[NSString class]]) {
-         NSString *value = (NSString *)item; // Just use the filename directly
-         NSLog(@" -> Preparing to return value: %@", value);
-         return value;
+    if ([item isKindOfClass:[FileSystemItem class]]) {
+        FileSystemItem *fsItem = (FileSystemItem *)item;
+        // We only have one column, display the item's name
+         NSString *value = fsItem.displayName;
+         NSLog(@" -> Returning displayName: %@", value);
+        return value;
     }
-    NSLog(@" -> Returning nil (item is not NSString or is nil: %@)", item);
+    NSLog(@" -> Returning nil (unknown item type)");
     return nil;
 }
 
 // --- NSOutlineViewDelegate Methods ---
 
-// Called when the selection in the outline view changes.
+// Called when the user selects a different row
 - (void)outlineViewSelectionDidChange:(NSNotification *)notification {
-    // Get the selected item.
-    id selectedItem = [self.outlineView itemAtRow:[self.outlineView selectedRow]];
-     NSLog(@"outlineViewSelectionDidChange: selectedItem = %@", selectedItem); // <-- Log selection change
+    NSLog(@"outlineViewSelectionDidChange:"); // Log entry
+    NSInteger selectedRow = [self.outlineView selectedRow];
+    self.currentlyOpenFile = nil; // Reset current file
+    // Don't clear text view immediately, only if selection is invalid or a directory
 
-    if (selectedItem) {
-        // Ensure selectedItem is an NSString
-        if (![selectedItem isKindOfClass:[NSString class]]) { // <-- Check if it's NOT a string
-            NSLog(@" -> Selected item is not an NSString: %@", selectedItem); // <-- Log inside the block
-            [self.textView setString:@"Error: Selected item is not a valid path."];
-            self.currentlyOpenFile = nil;
-            return; // Exit early if type is wrong
-        }
+    if (selectedRow != -1) {
+        // Get the FileSystemItem associated with the selected row
+        id selectedItem = [self.outlineView itemAtRow:selectedRow];
 
-        // Now we know selectedItem is an NSString
-        NSString *relativePath = (NSString *)selectedItem;
-        NSString *fullPath = [self.rootPath stringByAppendingPathComponent:relativePath];
-        BOOL isDir = NO;
+        if (selectedItem && [selectedItem isKindOfClass:[FileSystemItem class]]) {
+            FileSystemItem *fsItem = (FileSystemItem *)selectedItem;
+             NSLog(@" -> Selected FileSystemItem: %@", fsItem); // Log the selected item
 
-        // Check if the selected item is a file.
-        if ([[NSFileManager defaultManager] fileExistsAtPath:fullPath isDirectory:&isDir] && !isDir) {
-             NSLog(@" -> Selected item is a file: %@", fullPath); // <-- Log file selected
-            NSError *error = nil;
-            // Read the file content as a string.
-            NSString *fileContent = [NSString stringWithContentsOfFile:fullPath
-                                                              encoding:NSUTF8StringEncoding // Assume UTF-8
-                                                                 error:&error];
+            // Check if the selected item is a file.
+            if (!fsItem.isDirectory) {
+                NSLog(@" -> Selected item is a file: %@", fsItem.fullPath);
+                NSError *error = nil;
+                // Read the file content as a string.
+                NSString *fileContent = [NSString stringWithContentsOfFile:fsItem.fullPath
+                                                                  encoding:NSUTF8StringEncoding // Assume UTF-8
+                                                                     error:&error];
 
-            if (error) {
-                NSLog(@" -> Error reading file %@: %@", fullPath, error);
-                // Display error in text view or show an alert.
-                [self.textView setString:[NSString stringWithFormat:@"Error loading file:\n%@", [error localizedDescription]]];
-                self.currentlyOpenFile = nil; // Cannot save if loading failed
-                NSAlert *alert = [NSAlert alertWithError:error];
-                [alert runModal];
+                if (error) {
+                    NSLog(@" -> Error reading file %@: %@", fsItem.fullPath, error);
+                    [self.textView setString:[NSString stringWithFormat:@"Error loading file:\n%@", [error localizedDescription]]];
+                    self.currentlyOpenFile = nil; // Cannot save if loading failed
+                    [self.mainWindow setTitle:[NSString stringWithFormat:@"Text Folder - %@", [self.rootPath lastPathComponent]]]; // Reset title
+                    NSAlert *alert = [NSAlert alertWithError:error];
+                    [alert runModal];
+                } else {
+                    NSLog(@" -> Successfully read file. Setting text view content.");
+                    [self.textView setString:fileContent ? fileContent : @""]; // Handle nil content
+                    self.currentlyOpenFile = fsItem.fullPath; // Keep track for saving
+                    [self.mainWindow setTitle:[NSString stringWithFormat:@"Text Folder - %@", fsItem.displayName]]; // Update title
+                }
             } else {
-                 NSLog(@" -> Successfully read file. Setting text view content."); // <-- Log file read success
-                // Display the content in the text view.
-                [self.textView setString:fileContent ? fileContent : @""]; // Handle nil content
-                // Keep track of the currently open file path for saving.
-                self.currentlyOpenFile = fullPath;
-                // Update window title to include file name
-                 [self.mainWindow setTitle:[NSString stringWithFormat:@"Text Folder - %@", [fullPath lastPathComponent]]];
+                NSLog(@" -> Selected item is a directory: %@", fsItem.fullPath);
+                // If a directory is selected, clear the text view and current file path.
+                [self.textView setString:@""];
+                self.currentlyOpenFile = nil;
+                [self.mainWindow setTitle:[NSString stringWithFormat:@"Text Folder - %@", [self.rootPath lastPathComponent]]]; // Reset window title
+                 // Optional: automatically expand the selected directory?
+                 // if (![self.outlineView isItemExpanded:fsItem]) {
+                 //    [self.outlineView expandItem:fsItem];
+                 // }
             }
         } else {
-             NSLog(@" -> Selected item is a directory or does not exist: %@", fullPath); // <-- Log directory selected
-            // If a directory is selected, clear the text view and current file path.
-            [self.textView setString:@""];
-            self.currentlyOpenFile = nil;
-            // Reset window title to folder name
-            [self.mainWindow setTitle:[NSString stringWithFormat:@"Text Folder - %@", [self.rootPath lastPathComponent]]];
+             NSLog(@" -> Selected item is nil or not a FileSystemItem: %@", selectedItem);
+             [self.textView setString:@""]; // Clear view if selection is weird
+             self.currentlyOpenFile = nil;
+             [self.mainWindow setTitle:[NSString stringWithFormat:@"Text Folder - %@", [self.rootPath lastPathComponent]]]; // Reset title
         }
     } else {
-         NSLog(@" -> Selection cleared."); // <-- Log selection cleared
-        // No selection, clear the text view.
+        NSLog(@" -> Selection cleared.");
+        // If selection is cleared, clear the text view and current file path.
         [self.textView setString:@""];
         self.currentlyOpenFile = nil;
-         // Reset window title to folder name (if rootPath exists)
-        if(self.rootPath) {
-           [self.mainWindow setTitle:[NSString stringWithFormat:@"Text Folder - %@", [self.rootPath lastPathComponent]]];
-        } else {
-           [self.mainWindow setTitle:@"Text Folder"];
-        }
+         // Reset window title to folder name if rootPath exists
+         if (self.rootPath) {
+             [self.mainWindow setTitle:[NSString stringWithFormat:@"Text Folder - %@", [self.rootPath lastPathComponent]]];
+         } else {
+              [self.mainWindow setTitle:@"Text Folder"];
+         }
     }
+     // Ensure text view scrolls to top after changing content
+     dispatch_async(dispatch_get_main_queue(), ^{
+         [self.textView scrollRangeToVisible:NSMakeRange(0, 0)];
+          NSLog(@" -> Scrolled text view to top.");
+     });
 }
 
 // --- NSSplitViewDelegate Methods ---

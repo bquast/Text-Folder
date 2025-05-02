@@ -1,5 +1,6 @@
 // AppDelegate.h
 #import <Cocoa/Cocoa.h>
+#import "FileSystemItem.h" // <-- Import the new header
 
 // Forward declaration
 @class FileSystemItem; // We might need a helper class later, declare it here
@@ -21,7 +22,7 @@
 // File System Data
 @property (strong) NSString *rootPath;
 @property (strong) NSString *currentlyOpenFile;
-@property (strong) NSArray<NSString *> *rootItems; // Top-level items for the outline view
+@property (strong) NSArray<FileSystemItem *> *rootItems; // Top-level items for the outline view
 
 // Method to open a folder
 - (void)openFolder:(id)sender;

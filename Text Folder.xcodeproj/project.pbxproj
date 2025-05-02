@@ -11,6 +11,7 @@
 		5474EBAF2DC36072004AF7E0 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5474EBAE2DC36072004AF7E0 /* Assets.xcassets */; };
 		5474EBB42DC36072004AF7E0 /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = 5474EBB32DC36072004AF7E0 /* main.m */; };
 		54D6B3AA2DC3644800275727 /* Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 54D6B3A92DC3644800275727 /* Info.plist */; };
+		54EB0DB22DC4D0070008062E /* FileSystemItem.m in Sources */ = {isa = PBXBuildFile; fileRef = 54EB0DB12DC4D0070008062E /* FileSystemItem.m */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -21,6 +22,8 @@
 		5474EBB52DC36072004AF7E0 /* Text_Folder.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Text_Folder.entitlements; sourceTree = "<group>"; };
 		5474EBBB2DC360A0004AF7E0 /* Text Folder.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Text Folder.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		54D6B3A92DC3644800275727 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		54EB0DB02DC4D0070008062E /* FileSystemItem.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = FileSystemItem.h; sourceTree = "<group>"; };
+		54EB0DB12DC4D0070008062E /* FileSystemItem.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = FileSystemItem.m; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -44,6 +47,8 @@
 				5474EBB52DC36072004AF7E0 /* Text_Folder.entitlements */,
 				5474EBBB2DC360A0004AF7E0 /* Text Folder.app */,
 				54D6B3A92DC3644800275727 /* Info.plist */,
+				54EB0DB02DC4D0070008062E /* FileSystemItem.h */,
+				54EB0DB12DC4D0070008062E /* FileSystemItem.m */,
 			);
 			sourceTree = "<group>";
 		};
@@ -121,6 +126,7 @@
 			files = (
 				5474EBB42DC36072004AF7E0 /* main.m in Sources */,
 				5474EBAD2DC36071004AF7E0 /* AppDelegate.m in Sources */,
+				54EB0DB22DC4D0070008062E /* FileSystemItem.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
