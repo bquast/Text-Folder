@@ -55,17 +55,26 @@
             NSString *childFullPath = [self.fullPath stringByAppendingPathComponent:name];
             // Pass the ORIGINAL basePath to maintain correct relative paths
             FileSystemItem *childItem = [[FileSystemItem alloc] initWithPath:childFullPath relativeTo:basePath];
-            [childItems addObject:childItem];
+            if (childItem) { // Check if item creation was successful
+                [childItems addObject:childItem];
+            }
         }
     }
 
-    // Sort children alphabetically by display name
+    // Sort children: Folders first, then files, alphabetically within each group
     [childItems sortUsingComparator:^NSComparisonResult(FileSystemItem *obj1, FileSystemItem *obj2) {
+        if (obj1.isDirectory && !obj2.isDirectory) {
+            return NSOrderedAscending; // obj1 (folder) comes before obj2 (file)
+        }
+        if (!obj1.isDirectory && obj2.isDirectory) {
+            return NSOrderedDescending; // obj1 (file) comes after obj2 (folder)
+        }
+        // If both are folders or both are files, sort alphabetically
         return [obj1.displayName localizedStandardCompare:obj2.displayName];
     }];
 
-    _children = [childItems copy]; // Assign the loaded children
-    NSLog(@" -> Loaded %lu children for %@", (unsigned long)_children.count, self.relativePath);
+    _children = [childItems copy]; // Assign the sorted children
+    NSLog(@" -> Loaded and sorted %lu children for %@", (unsigned long)_children.count, self.relativePath);
 }
 
 // Override description for easier debugging

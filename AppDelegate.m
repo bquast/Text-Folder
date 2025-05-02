@@ -261,19 +261,29 @@ NSMenuItem* createMenuItem(NSMenu *menu, NSString *title, NSString *keyEquivalen
     } else {
         NSMutableArray<FileSystemItem *> *items = [NSMutableArray array];
         for (NSString *name in rawContents) {
-            if (![name hasPrefix:@"."]) { // Basic filter for hidden files
+            if (![name hasPrefix:@"."]) { // Skip hidden files/folders
                 NSString *fullPath = [self.rootPath stringByAppendingPathComponent:name];
-                // Create FileSystemItem objects for the top level
                 FileSystemItem *item = [[FileSystemItem alloc] initWithPath:fullPath relativeTo:self.rootPath];
-                [items addObject:item];
+                if (item) { // Check if item creation was successful
+                    [items addObject:item];
+                }
             }
         }
-        // Sort top-level items alphabetically
+
+        // Sort: Folders first, then files, alphabetically within each group
         [items sortUsingComparator:^NSComparisonResult(FileSystemItem *obj1, FileSystemItem *obj2) {
+            if (obj1.isDirectory && !obj2.isDirectory) {
+                return NSOrderedAscending; // obj1 (folder) comes before obj2 (file)
+            }
+            if (!obj1.isDirectory && obj2.isDirectory) {
+                return NSOrderedDescending; // obj1 (file) comes after obj2 (folder)
+            }
+            // If both are folders or both are files, sort alphabetically
             return [obj1.displayName localizedStandardCompare:obj2.displayName];
         }];
-        self.rootItems = [items copy]; // Assign the array of FileSystemItem
-        NSLog(@"Loaded %lu root items: %@", (unsigned long)self.rootItems.count, self.rootItems);
+
+        self.rootItems = [items copy]; // Assign the sorted items
+        NSLog(@"Loaded and sorted %lu root items", (unsigned long)self.rootItems.count);
     }
 
     // IMPORTANT: Reload the outline view data on the main thread
@@ -359,18 +369,62 @@ NSMenuItem* createMenuItem(NSMenu *menu, NSString *title, NSString *keyEquivalen
     return NO;
 }
 
-// What value should be displayed for 'item' in 'tableColumn'?
-- (nullable id)outlineView:(NSOutlineView *)outlineView objectValueForTableColumn:(nullable NSTableColumn *)tableColumn byItem:(nullable id)item {
-    NSLog(@"***** dataSource: outlineView:objectValueForTableColumn:byItem: CALLED! item=%@", item);
-    if ([item isKindOfClass:[FileSystemItem class]]) {
-        FileSystemItem *fsItem = (FileSystemItem *)item;
-        // We only have one column, display the item's name
-         NSString *value = fsItem.displayName;
-         NSLog(@" -> Returning displayName: %@", value);
-        return value;
+// Provide a custom view for each cell in the outline view
+- (nullable NSView *)outlineView:(NSOutlineView *)outlineView viewForTableColumn:(nullable NSTableColumn *)tableColumn item:(id)item {
+    // Ensure the item is what we expect
+    if (![item isKindOfClass:[FileSystemItem class]]) {
+        return nil;
     }
-    NSLog(@" -> Returning nil (unknown item type)");
-    return nil;
+    FileSystemItem *fsItem = (FileSystemItem *)item;
+
+    // Identifier for the cell view - reuse cells for performance
+    NSString *identifier = @"DataCell"; // Must match the column identifier or a custom one
+
+    // Attempt to reuse an existing cell view
+    NSTableCellView *cellView = [outlineView makeViewWithIdentifier:identifier owner:self];
+
+    // If no reusable cell view is available, create a new one
+    if (cellView == nil) {
+        // Create a new cell view with a text field
+        cellView = [[NSTableCellView alloc] initWithFrame:NSZeroRect];
+        NSTextField *textField = [[NSTextField alloc] initWithFrame:NSZeroRect];
+        [textField setBezeled:NO];
+        [textField setDrawsBackground:NO];
+        [textField setEditable:NO];
+        [textField setSelectable:NO]; // Usually selectable via row selection
+        // Use autolayout constraints for the text field within the cell view
+        textField.translatesAutoresizingMaskIntoConstraints = NO;
+        [cellView addSubview:textField];
+        // Pin text field edges to the cell view edges (adjust margins if needed)
+        [NSLayoutConstraint activateConstraints:@[
+            [textField.leadingAnchor constraintEqualToAnchor:cellView.leadingAnchor constant:2], // Small leading margin
+            [textField.trailingAnchor constraintEqualToAnchor:cellView.trailingAnchor constant:-2], // Small trailing margin
+            [textField.centerYAnchor constraintEqualToAnchor:cellView.centerYAnchor]
+        ]];
+        cellView.textField = textField; // Associate text field with cell view
+        cellView.identifier = identifier; // Set the identifier for reuse
+         NSLog(@"Created new cell view for identifier: %@", identifier);
+    } else {
+        // NSLog(@"Reused cell view for identifier: %@", identifier);
+    }
+
+
+    // --- Configure the cell view based on the item ---
+    // Set the text field's value
+    cellView.textField.stringValue = fsItem.displayName ?: @""; // Use display name, handle nil
+
+    // Set font based on whether it's a directory
+    if (fsItem.isDirectory) {
+         // Use bold system font for directories
+         cellView.textField.font = [NSFont boldSystemFontOfSize:[NSFont systemFontSize]];
+         // NSLog(@" -> Set bold font for directory: %@", fsItem.displayName);
+    } else {
+        // Use regular system font for files
+         cellView.textField.font = [NSFont systemFontOfSize:[NSFont systemFontSize]];
+         // NSLog(@" -> Set regular font for file: %@", fsItem.displayName);
+    }
+
+    return cellView;
 }
 
 // --- NSOutlineViewDelegate Methods ---
